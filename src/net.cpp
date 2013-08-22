@@ -621,6 +621,9 @@ void CNode::copyStats(CNodeStats &stats)
     X(nSendBytes);
     X(nRecvBytes);
     stats.fSyncNode = (this == pnodeSync);
+    
+    // Leave string empty if addrLocal invalid (not filled in yet)
+    stats.addrLocal = addrLocal.IsValid() ? addrLocal.ToString() : "";
 }
 #undef X
 
