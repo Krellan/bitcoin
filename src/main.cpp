@@ -3850,6 +3850,33 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
     }
 
 
+    else if (strCommand == "pong")
+    {
+        int64 pingUsecEnd = GetTimeMicros();
+        uint64 nonce = 0;
+        vRecv >> nonce;
+        
+        // Only process pong message if there is an outstanding ping (old ping without nonce should never pong)
+        if (pfrom->nPingNonceSent != 0) {
+            if (nonce == pfrom->nPingNonceSent) {
+                // Matching pong received, this ping is no longer outstanding
+                pfrom->nPingNonceSent = 0;
+                int64 pingUsecTime = pingUsecEnd - pfrom->nPingUsecStart;
+                if (pingUsecTime > 0) {
+                    // Successful ping time measurement, replace previous
+                    pfrom->nPingUsecTime = pingUsecTime;
+                }
+            } else {
+                printf("pong: %s mismatch %"PRI64x" expected %"PRI64x" ver %s\n", pfrom->addr.ToString().c_str(), nonce, pfrom->nPingNonceSent, pfrom->strSubVer.c_str());
+                if (nonce == 0) {
+                    // If pong nonce is zero, it's likely a bug in another implementation elsewhere
+                    pfrom->nPingNonceSent = 0;
+                }
+            }
+        }
+    }
+    
+    
     else if (strCommand == "alert")
     {
         CAlert alert;
@@ -4071,14 +4098,39 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         if (pto->nVersion == 0)
             return true;
 
-        // Keep-alive ping. We send a nonce of zero because we don't use it anywhere
-        // right now.
+        //
+        // Message: ping
+        //
+        bool pingSend = false;
+        if (pto->fPingQueued) {
+            // RPC ping request by user
+            pingSend = true;
+        }
         if (pto->nLastSend && GetTime() - pto->nLastSend > 30 * 60 && pto->vSendMsg.empty()) {
-            uint64 nonce = 0;
-            if (pto->nVersion > BIP0031_VERSION)
+            // Ping automatically sent as a keepalive
+            pingSend = true;
+        }
+        if (pingSend) {
+            uint64 nonce = pto->nPingNonceQueued;
+            if (0 == nonce) {
+                // Ping will not have preinitialized nonce if keepalive (not queued by RPC)
+                RAND_bytes((unsigned char*)&nonce, sizeof(nonce));
+                if (0 == nonce) {
+                    nonce ++;
+                }
+            }
+            pto->nPingNonceSent = nonce;
+            pto->nPingNonceQueued = 0;
+            pto->fPingQueued = false;
+            if (pto->nVersion > BIP0031_VERSION) {
+                // Take timestamp as close as possible before transmitting ping
+                pto->nPingUsecStart = GetTimeMicros();
                 pto->PushMessage("ping", nonce);
-            else
+            } else {
+                // Peer is too old to support ping command with nonce, pong will never arrive, disable timing
+                pto->nPingUsecStart = 0;
                 pto->PushMessage("ping");
+            }
         }
 
         // Start block sync
