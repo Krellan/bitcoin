@@ -110,8 +110,6 @@ public:
     int64 nLastSend;
     int64 nLastRecv;
     int64 nTimeConnected;
-    double dPingTime;
-    int nPingStat;
     std::string addrName;
     int nVersion;
     std::string strSubVer;
@@ -121,6 +119,7 @@ public:
     uint64 nSendBytes;
     uint64 nRecvBytes;
     bool fSyncNode;
+    double dPingTime;
 };
 
 
@@ -237,10 +236,12 @@ public:
     std::multimap<int64, CInv> mapAskFor;
 
     // Ping time measurement
-    bool fPingRequested;
-    uint64 nPingNonce;
-    int64 nPingStart;
-    int64 nPingTime;
+    uint64 nPingNonceQueued;
+    uint64 nPingNonceSent;
+    int64 nPingTimeCmd;
+    int64 nPingUsecStart;
+    int64 nPingUsecTime;
+    bool fPingQueued;
     
     CNode(SOCKET hSocketIn, CAddress addrIn, std::string addrNameIn = "", bool fInboundIn=false) : ssSend(SER_NETWORK, MIN_PROTO_VERSION)
     {
@@ -276,9 +277,12 @@ public:
         fRelayTxes = false;
         setInventoryKnown.max_size(SendBufferSize() / 1000);
         pfilter = new CBloomFilter();
-        fPingRequested = false;
-        nPingStart = -1; // no ping request outstanding on network right now
-        nPingTime = -1; // no previous ping request successfully completed yet
+        nPingNonceQueued = 0;
+	nPingNonceSent = 0;
+        nPingTimeCmd = 0;
+        nPingUsecStart = 0;
+        nPingUsecTime = 0;
+        fPingQueued = false;
 
         // Be shy and don't send version until we hear
         if (hSocket != INVALID_SOCKET && !fInbound)

@@ -25,15 +25,24 @@ Value ping(const Array& params, bool fHelp)
         throw runtime_error(
             "ping\n"
             "Requests that a ping be sent to all other nodes, to measure ping time.\n"
-            "Results in getpeerinfo: pingtime is decimal seconds, pingstat is bitmask.\n"
-            "Bitmask: 0x1 = ping requested, 0x2 = ping is in flight.\n"
+            "Results provided in getpeerinfo, pingtime field is decimal seconds.\n"
             "Ping command is handled in queue with all other commands, so it measures processing backlog, not just network ping.");
-
+    
+    // Avoid overconsuming random entropy, do this only once regardless of number of nodes
+    uint64 nonce;
+    RAND_bytes((unsigned char*)&nonce, sizeof(nonce));
+    
+    // Ensure each node has a unique nonzero nonce
     LOCK(cs_vNodes);
     BOOST_FOREACH(CNode* pNode, vNodes) {
-        pNode->fPingRequested = true;
+        pNode->fPingQueued = true;
+        if (0 == nonce) {
+            nonce ++;
+        }
+        pNode->nPingNonceQueued = nonce;
+        nonce ++;
     }
-    
+
     return Value::null;
 }
 
@@ -73,7 +82,6 @@ Value getpeerinfo(const Array& params, bool fHelp)
         obj.push_back(Pair("bytesrecv", (boost::int64_t)stats.nRecvBytes));
         obj.push_back(Pair("conntime", (boost::int64_t)stats.nTimeConnected));
         obj.push_back(Pair("pingtime", stats.dPingTime));
-        obj.push_back(Pair("pingstat", stats.nPingStat));
         obj.push_back(Pair("version", stats.nVersion));
         obj.push_back(Pair("subver", stats.strSubVer));
         obj.push_back(Pair("inbound", stats.fInbound));

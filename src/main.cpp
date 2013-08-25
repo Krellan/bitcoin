@@ -3845,31 +3845,57 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             // seconds to respond to each, the 5th ping the remote sends would appear to
             // return very quickly.
             pfrom->PushMessage("pong", nonce);
-            printf("Ping %s: Echoed nonce %"PRI64x"\n", pfrom->addrName.c_str(), nonce);
+            if (fDebug) {
+                printf("ping %s: Recv %"PRI64x", echoing\n", pfrom->addrName.c_str(), nonce);
+            }
         } else {
-            printf("Ping %s: Ignoring ping, peer version %d is too old for pong\n", pfrom->addrName.c_str(), pfrom->nVersion);
+            if (fDebug) {
+                printf("ping %s: Recv untimed from old peer\n", pfrom->addrName.c_str());
+            }
         }
     }
 
 
     else if (strCommand == "pong")
     {
-        int64 pingEnded = GetTimeMicros();
+        int64 pingUsecEnd = GetTimeMicros();
         uint64 nonce = 0;
         vRecv >> nonce;
-        if (nonce == pfrom->nPingNonce) {
-            if (pfrom->nPingStart > 0) {
-                // Successful ping, remember how long the roundtrip took
-                pfrom->nPingTime = pingEnded - pfrom->nPingStart;
-                printf("Pong %s: Matched nonce %"PRI64x", %"PRI64d" usec\n", pfrom->addrName.c_str(), nonce, pfrom->nPingTime);
-            } else {
-                printf("Pong %s: Lost track of timestamp for comparison\n", pfrom->addrName.c_str());
+        
+        if (0 != pfrom->nPingNonceSent) {
+            bool bAcceptable = false;
+            if (nonce == pfrom->nPingNonceSent) {
+                bAcceptable = true;
+                if (fDebug) {
+                    printf("pong %s: Recv %"PRI64x", complete\n", pfrom->addrName.c_str(), nonce);
+                }
+            }
+            else if (0 == nonce) {
+                // Old peer always replied with 0, this is OK but timing will be incorrect if pings overlap
+                bAcceptable = true;
+                if (fDebug) {
+                    printf("pong %s: Recv nonce zero, expected %"PRI64x"\n", pfrom->addrName.c_str(), pfrom->nPingNonceSent);
+                }
             }
             
-            // This completes the ping request, it is no longer outstanding
-            pfrom->nPingStart = -1;
+            if (bAcceptable) {
+                // Acceptable pong received, this ping is no longer outstanding
+                pfrom->nPingNonceSent = 0;
+                int64 pingUsecTime = pingUsecEnd - pfrom->nPingUsecStart;
+                if (pingUsecTime <= 0) {
+                    printf("pong %s: Time measurement problem, start %"PRI64d", end %"PRI64d"\n", pfrom->addrName.c_str(), pfrom->nPingUsecStart, pingUsecEnd);
+                } else {
+                    // Successful ping, replace previous time measurement
+                    pfrom->nPingUsecTime = pingUsecTime;
+                    printf("pong %s: Time %"PRI64d"\n", pfrom->addrName.c_str(), pingUsecTime);
+                }
+            } else {
+                // Nonce mismatch is normal if overlapping ping, continue to wait for our matching ping to arrive
+                printf("pong %s: Recv nonce mismatch, expected %"PRI64x", received %"PRI64x"\n", pfrom->addrName.c_str(), pfrom->nPingNonceSent, nonce);
+            }
         } else {
-            printf("Pong %s: Ignoring nonce mismatch, expected %"PRI64x", received %"PRI64x"\n", pfrom->addrName.c_str(), pfrom->nPingNonce, nonce);
+            // Sent nonce is zero, that means there was no outstanding ping (old ping without nonce should never pong)
+            printf("pong %s: Recv unsolicited pong without ping\n", pfrom->addrName.c_str());
         }
     }
     
@@ -4095,26 +4121,52 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         if (pto->nVersion == 0)
             return true;
 
-        // Keep-alive ping, or an explicit request by user to send a ping right now
+        //
+        // Message: ping
+        //
         bool pingSend = false;
-        if (pto->fPingRequested) {
-            pingSend = true;
+        if (pto->fPingQueued) {
+            // RPC ping request by user, throttle to 1/second
+            int64_t pingTimeCmd = GetTime();
+            if (pto->nPingTimeCmd != pingTimeCmd) {
+                pto->nPingTimeCmd = pingTimeCmd;
+                pingSend = true;
+            } else {
+                if (fDebug) {
+                    printf("ping %s: Send throttled by ratelimit\n", pto->addrName.c_str());
+                }
+            }
         }
         if (pto->nLastSend && GetTime() - pto->nLastSend > 30 * 60 && pto->vSendMsg.empty()) {
+            // Ping automatically sent as a keepalive
             pingSend = true;
         }
         if (pingSend) {
-            uint64 nonce;
-            RAND_bytes((unsigned char*)&nonce, sizeof(nonce));
-            pto->fPingRequested = false;
-            pto->nPingNonce = nonce;
-            pto->nPingStart = GetTimeMicros();
+            uint64 nonce = pto->nPingNonceQueued;
+            if (0 == nonce) {
+                // Ping will not have preinitialized nonce if keepalive (not queued by RPC)
+                RAND_bytes((unsigned char*)&nonce, sizeof(nonce));
+                if (0 == nonce) {
+                    nonce ++;
+                }
+            }
+            pto->nPingNonceSent = nonce;
+            pto->nPingNonceQueued = 0;
+            pto->fPingQueued = false;
             if (pto->nVersion > BIP0031_VERSION) {
+                // Take timestamp as close as possible before transmitting ping
+                pto->nPingUsecStart = GetTimeMicros();
                 pto->PushMessage("ping", nonce);
+                if (fDebug) {
+                    printf("ping %s: Send %"PRI64x"\n", pto->addrName.c_str(), nonce);
+                }
             } else {
                 // Peer is too old to support ping command with nonce, pong will never arrive, disable timing
-                pto->nPingStart = -1;
+                pto->nPingUsecStart = 0;
                 pto->PushMessage("ping");
+                if (fDebug) {
+                    printf("ping %s: Send untimed to old peer\n", pto->addrName.c_str());
+                }
             }
         }
 
