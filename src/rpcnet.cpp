@@ -46,7 +46,7 @@ Value ping(const Array& params, bool fHelp)
     return Value::null;
 }
 
-static void CopyNodeStats(std::vector<CNodeStats>& vstats)
+static void CopyNodeStats(std::vector<CNodeStats>& vstats, int64 nPingUsecNow)
 {
     vstats.clear();
 
@@ -54,7 +54,7 @@ static void CopyNodeStats(std::vector<CNodeStats>& vstats)
     vstats.reserve(vNodes.size());
     BOOST_FOREACH(CNode* pnode, vNodes) {
         CNodeStats stats;
-        pnode->copyStats(stats);
+        pnode->copyStats(stats, nPingUsecNow);
         vstats.push_back(stats);
     }
 }
@@ -66,8 +66,10 @@ Value getpeerinfo(const Array& params, bool fHelp)
             "getpeerinfo\n"
             "Returns data about each connected network node.");
 
+    // Get a consistent timestamp early, for ping time fixup
+    int64 nPingUsecNow = GetTimeMicros();   
     vector<CNodeStats> vstats;
-    CopyNodeStats(vstats);
+    CopyNodeStats(vstats, nPingUsecNow);
 
     Array ret;
 

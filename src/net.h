@@ -653,7 +653,7 @@ public:
     static void ClearBanned(); // needed for unit testing
     static bool IsBanned(CNetAddr ip);
     bool Misbehaving(int howmuch); // 1 == a little, 100 == a lot
-    void copyStats(CNodeStats &stats);
+    void copyStats(CNodeStats &stats, int64 nPingUsecNow);
 };
 
 

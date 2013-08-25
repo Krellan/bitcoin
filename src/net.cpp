@@ -595,7 +595,7 @@ bool CNode::Misbehaving(int howmuch)
 
 #undef X
 #define X(name) stats.name = name
-void CNode::copyStats(CNodeStats &stats)
+void CNode::copyStats(CNodeStats &stats, int64 nPingUsecNow)
 {
     X(nServices);
     X(nLastSend);
@@ -611,8 +611,19 @@ void CNode::copyStats(CNodeStats &stats)
     X(nRecvBytes);
     stats.fSyncNode = (this == pnodeSync);
     
+    // If ping is still in flight, and flight time is taking longer than the previously completed ping time,
+    // report flight time instead.
+    // This prevents a falsely low ping time from a node that has just recently become lagged.
+    int64 nPingUsecOutput = nPingUsecTime;
+    if ((0 != nPingNonceSent) && (0 != nPingUsecStart)) {
+        int64 nPingUsecElapsed = nPingUsecNow - nPingUsecStart;
+        if (nPingUsecOutput < nPingUsecElapsed) {
+            nPingUsecOutput = nPingUsecElapsed;
+        }
+    }
+    
     // Raw ping time is in microseconds, but show it to user as whole seconds (Bitcoin users should be well used to small numbers with many decimal places by now :)
-    stats.dPingTime = (((double)nPingUsecTime) / 1000000.0);
+    stats.dPingTime = (((double)nPingUsecOutput) / 1000000.0);
 }
 #undef X
 
