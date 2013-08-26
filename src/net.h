@@ -120,6 +120,7 @@ public:
     uint64 nRecvBytes;
     bool fSyncNode;
     double dPingTime;
+    double dPingWait;
 };
 
 
@@ -238,7 +239,6 @@ public:
     // Ping time measurement
     uint64 nPingNonceQueued;
     uint64 nPingNonceSent;
-    int64 nPingTimeCmd;
     int64 nPingUsecStart;
     int64 nPingUsecTime;
     bool fPingQueued;
@@ -278,8 +278,7 @@ public:
         setInventoryKnown.max_size(SendBufferSize() / 1000);
         pfilter = new CBloomFilter();
         nPingNonceQueued = 0;
-	nPingNonceSent = 0;
-        nPingTimeCmd = 0;
+        nPingNonceSent = 0;
         nPingUsecStart = 0;
         nPingUsecTime = 0;
         fPingQueued = false;

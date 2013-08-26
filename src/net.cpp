@@ -611,19 +611,20 @@ void CNode::copyStats(CNodeStats &stats, int64 nPingUsecNow)
     X(nRecvBytes);
     stats.fSyncNode = (this == pnodeSync);
     
-    // If ping is still in flight, and flight time is taking longer than the previously completed ping time,
-    // report flight time instead.
-    // This prevents a falsely low ping time from a node that has just recently become lagged.
-    int64 nPingUsecOutput = nPingUsecTime;
+    // It is common for nodes with good ping times to suddenly become lagged,
+    // due to a new block arriving or other large transfer.
+    // Merely reporting pingtime might fool the caller into thinking the node was still responsive,
+    // since pingtime does not update until the ping is complete, which might take a while.
+    // So, if a ping is taking an unusually long time in flight,
+    // the caller can immediately detect that this is happening.
+    int64 nPingUsecWait = 0;
     if ((0 != nPingNonceSent) && (0 != nPingUsecStart)) {
-        int64 nPingUsecElapsed = nPingUsecNow - nPingUsecStart;
-        if (nPingUsecOutput < nPingUsecElapsed) {
-            nPingUsecOutput = nPingUsecElapsed;
-        }
+        nPingUsecWait = nPingUsecNow - nPingUsecStart;
     }
     
     // Raw ping time is in microseconds, but show it to user as whole seconds (Bitcoin users should be well used to small numbers with many decimal places by now :)
-    stats.dPingTime = (((double)nPingUsecOutput) / 1000000.0);
+    stats.dPingTime = (((double)nPingUsecTime) / 1e6);
+    stats.dPingWait = (((double)nPingUsecWait) / 1e6);
 }
 #undef X
 

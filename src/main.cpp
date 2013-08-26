@@ -4126,16 +4126,8 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
         //
         bool pingSend = false;
         if (pto->fPingQueued) {
-            // RPC ping request by user, throttle to 1/second
-            int64_t pingTimeCmd = GetTime();
-            if (pto->nPingTimeCmd != pingTimeCmd) {
-                pto->nPingTimeCmd = pingTimeCmd;
-                pingSend = true;
-            } else {
-                if (fDebug) {
-                    printf("ping %s: Send throttled by ratelimit\n", pto->addrName.c_str());
-                }
-            }
+            // RPC ping request by user
+            pingSend = true;
         }
         if (pto->nLastSend && GetTime() - pto->nLastSend > 30 * 60 && pto->vSendMsg.empty()) {
             // Ping automatically sent as a keepalive
