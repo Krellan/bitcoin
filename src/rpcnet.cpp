@@ -28,19 +28,10 @@ Value ping(const Array& params, bool fHelp)
             "Results provided in getpeerinfo, pingtime and pingwait fields are decimal seconds.\n"
             "Ping command is handled in queue with all other commands, so it measures processing backlog, not just network ping.");
     
-    // Avoid overconsuming random entropy, do this only once regardless of number of nodes
-    uint64 nonce;
-    RAND_bytes((unsigned char*)&nonce, sizeof(nonce));
-    
-    // Ensure each node has a unique nonzero nonce
+    // Request that each node send a ping during next message processing pass
     LOCK(cs_vNodes);
     BOOST_FOREACH(CNode* pNode, vNodes) {
         pNode->fPingQueued = true;
-        if (0 == nonce) {
-            nonce ++;
-        }
-        pNode->nPingNonceQueued = nonce;
-        nonce ++;
     }
 
     return Value::null;

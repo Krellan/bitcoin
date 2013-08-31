@@ -237,7 +237,6 @@ public:
     std::multimap<int64, CInv> mapAskFor;
 
     // Ping time measurement
-    uint64 nPingNonceQueued;
     uint64 nPingNonceSent;
     int64 nPingUsecStart;
     int64 nPingUsecTime;
@@ -277,7 +276,6 @@ public:
         fRelayTxes = false;
         setInventoryKnown.max_size(SendBufferSize() / 1000);
         pfilter = new CBloomFilter();
-        nPingNonceQueued = 0;
         nPingNonceSent = 0;
         nPingUsecStart = 0;
         nPingUsecTime = 0;

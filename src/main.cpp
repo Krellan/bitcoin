@@ -3854,25 +3854,55 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
     {
         int64 pingUsecEnd = GetTimeMicros();
         uint64 nonce = 0;
-        vRecv >> nonce;
+        size_t nAvail = vRecv.in_avail();
+        bool bPingFinished = false;
+        std::string sProblem;
         
-        // Only process pong message if there is an outstanding ping (old ping without nonce should never pong)
-        if (pfrom->nPingNonceSent != 0) {
-            if (nonce == pfrom->nPingNonceSent) {
-                // Matching pong received, this ping is no longer outstanding
-                pfrom->nPingNonceSent = 0;
-                int64 pingUsecTime = pingUsecEnd - pfrom->nPingUsecStart;
-                if (pingUsecTime > 0) {
-                    // Successful ping time measurement, replace previous
-                    pfrom->nPingUsecTime = pingUsecTime;
+        if (nAvail >= sizeof(nonce)) {
+            vRecv >> nonce;
+        
+            // Only process pong message if there is an outstanding ping (old ping without nonce should never pong)
+            if (pfrom->nPingNonceSent != 0) {
+                if (nonce == pfrom->nPingNonceSent) {
+                    // Matching pong received, this ping is no longer outstanding
+                    bPingFinished = true;
+                    int64 pingUsecTime = pingUsecEnd - pfrom->nPingUsecStart;
+                    if (pingUsecTime > 0) {
+                        // Successful ping time measurement, replace previous
+                        pfrom->nPingUsecTime = pingUsecTime;
+                    } else {
+                        // This should never happen
+                        sProblem = "Timing mishap";
+                    }
+                } else {
+                    // Nonce mismatches are normal when pings are overlapping
+                    sProblem = "Nonce mismatch";
+                    if (nonce == 0) {
+                        // This is most likely a bug in another implementation somewhere, cancel this ping
+                        bPingFinished = true;
+                        sProblem = "Nonce zero";
+                    }
                 }
             } else {
-                printf("pong: %s mismatch %"PRI64x" expected %"PRI64x" ver %s\n", pfrom->addr.ToString().c_str(), nonce, pfrom->nPingNonceSent, pfrom->strSubVer.c_str());
-                if (nonce == 0) {
-                    // If pong nonce is zero, it's likely a bug in another implementation elsewhere
-                    pfrom->nPingNonceSent = 0;
-                }
+                sProblem = "Unsolicited pong without ping";
             }
+        } else {
+            // This is most likely a bug in another implementation somewhere, cancel this ping
+            bPingFinished = true;
+            sProblem = "Short payload";
+        }
+        
+        if (!(sProblem.empty())) {
+            printf("pong %s %s: %s, %"PRI64x" expected, %"PRI64x" received, %zu bytes\n"
+                , pfrom->addr.ToString().c_str()
+                , pfrom->strSubVer.c_str()
+                , sProblem.c_str()
+                , pfrom->nPingNonceSent
+                , nonce
+                , nAvail);
+        }
+        if (bPingFinished) {
+            pfrom->nPingNonceSent = 0;
         }
     }
     
@@ -4111,16 +4141,11 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
             pingSend = true;
         }
         if (pingSend) {
-            uint64 nonce = pto->nPingNonceQueued;
-            if (0 == nonce) {
-                // Ping will not have preinitialized nonce if keepalive (not queued by RPC)
+            uint64 nonce = 0;
+            while (nonce == 0) {
                 RAND_bytes((unsigned char*)&nonce, sizeof(nonce));
-                if (0 == nonce) {
-                    nonce ++;
-                }
             }
             pto->nPingNonceSent = nonce;
-            pto->nPingNonceQueued = 0;
             pto->fPingQueued = false;
             if (pto->nVersion > BIP0031_VERSION) {
                 // Take timestamp as close as possible before transmitting ping
