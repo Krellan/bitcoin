@@ -631,7 +631,7 @@ void CNode::copyStats(CNodeStats &stats)
     stats.dPingWait = (((double)nPingUsecWait) / 1e6);
     
     // Leave string empty if addrLocal invalid (not filled in yet)
-    stats.addrLocal = addrLocal.IsValid() ? addrLocal.ToString().c_str() : "";
+    stats.addrLocal = addrLocal.IsValid() ? addrLocal.ToString() : "";
 }
 #undef X
 
